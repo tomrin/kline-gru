@@ -52,7 +52,7 @@ ai_handler = RotatingFileHandler(
 ai_handler.setFormatter(logging.Formatter('[%(asctime)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 ai_log.addHandler(ai_handler)
 
-PORT = 8200
+PORT = 8300
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(DIRECTORY, 'data')
 os.makedirs(DATA_DIR, exist_ok=True)

@@ -57,7 +57,7 @@ TRAIN_KLINE_COUNT = 30 # 训练使用的K线数量
 #   'knn' = 欧氏距离 KNN（路线1，手工特征 + 固定度量）
 #   'gru' = GRU 学习嵌入 + 余弦相似度（路线2，学习度量）
 # 切换：改 RETRIEVER 即可，二者同层级、可互换；gru 需先运行 python gru_train.py
-RETRIEVER = 'gru'
+RETRIEVER = 'knn'
 
 # 讲解层：当前使用的大模型（须在下方 LLM_PROVIDERS 中登记）
 LLM_PROVIDER = 'kimi'
