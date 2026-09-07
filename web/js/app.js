@@ -90,16 +90,29 @@ function setRetrieverSwitch(name) {
     }
 }
 
-/** 切换检索器（KNN / GRU），切换后需重新触发一次检索以生效 */
+/** 切换检索器并立即触发检索（KNN / GRU 结果各自独立保留，可同时对比） */
 function switchRetriever(name) {
-    if (window._retriever === name) return;
     setRetrieverSwitch(name);
-    // 若已有检索结果，提示用户重新点「深度讲评」以用新检索器检索
-    var body = document.getElementById('layerRetrieverBody');
-    if (body && window._knnCard) {
-        body.innerHTML = '<div class="layer-placeholder">已切换到 ' + name.toUpperCase() + '，点「深度讲评」重新检索相似形态</div>';
-        window._knnCard = null;
+    triggerRetrieval(name);
+}
+
+/** 取当前检索上下文（游戏状态 + K线数据）；未开始训练返回 null */
+function getRetrievalContext() {
+    var s = engine.state;
+    if (!s || !s.stock || s.phase !== 'playing') {
+        showMsg('请先开始训练', 'warn');
+        return null;
     }
+    return {
+        s: s,
+        allKline: [...s.stock.referenceKline, ...s.stock.kline.slice(0, s.visibleCount)]
+    };
+}
+
+/** 触发指定检索器检索（结果渲染到对应区并保留，不影响另一路的结果） */
+function triggerRetrieval(name) {
+    var ctx = getRetrievalContext();
+    if (ctx) requestRetriever(name, ctx.allKline, ctx.s);
 }
 
 /** 更新某层的引擎名+耗时标注 */
@@ -264,8 +277,8 @@ function callAIAnalysis(allKline, currentIndex, s) {
     var learningSummary = getAILearningSummary();
     console.log('[AI] learningSummary长度=', learningSummary ? learningSummary.length : 0);
 
-    // 先秒级检索 KNN 相似历史形态并即时呈现（不等待 Kimi，1秒内可见）
-    requestKNN(allKline, s, currentIndex);
+    // 先用当前选中的检索器秒级检索相似历史形态并即时呈现（不等待 Kimi，1秒内可见）
+    requestRetriever(window._retriever || 'knn', allKline, s);
 
     var payload = {
         klineData: allKline,
@@ -346,49 +359,57 @@ function callAIAnalysis(allKline, currentIndex, s) {
     console.log('[AI] xhr.send 已调用');
 }
 
-/** 秒级检索相似历史形态并渲染（独立于 Kimi，避免长时间等待） */
-function requestKNN(allKline, s, currentIndex) {
-    console.log('[Retriever] 开始秒级检索, 当前检索器=', window._retriever || 'knn');
-    window._knnCard = null;
+/** 指定检索器（knn/gru）检索相似历史形态，结果渲染到该检索器专属区域并保留 */
+function requestRetriever(name, allKline, s) {
+    name = name || 'knn';
+    var isGru = (name === 'gru');
+    var bodyEl = document.getElementById(isGru ? 'gruResultBody' : 'knnResultBody');
+    var statusEl = document.getElementById(isGru ? 'gruStatus' : 'knnStatus');
+
+    console.log('[Retriever] 开始检索, 检索器=', name);
+    if (statusEl) { statusEl.textContent = '检索中...'; statusEl.className = 'rr-status running'; }
+    if (bodyEl) bodyEl.innerHTML = '<div class="layer-placeholder">检索中…</div>';
+
     var payload = {
         klineData: allKline,
         stockCode: s.stock.code,
-        retriever: window._retriever || 'knn'
+        retriever: name
     };
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/knn', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onload = function() {
-        console.log('[KNN] onload status=', xhr.status);
         if (xhr.status === 200) {
             try {
                 var resp = JSON.parse(xhr.responseText);
                 if (resp.success && resp.cases && resp.cases.length > 0) {
-                    console.log('[KNN] 检索到', resp.cases.length, '个相似案例');
-                    window._knnCard = buildKNNCard(resp.cases);
-                    renderKNNAndLoading();
+                    console.log('[Retriever] ' + name + ' 检索到', resp.cases.length, '个案例');
+                    window._cards = window._cards || {};
+                    window._cards[name] = buildKNNCard(resp.cases, name);
+                    if (bodyEl) bodyEl.innerHTML = window._cards[name];
+                    if (statusEl) { statusEl.textContent = resp.cases.length + ' 例'; statusEl.className = 'rr-status done'; }
                 } else {
-                    console.warn('[KNN] 无结果:', resp.message);
-                    var eb = document.getElementById('layerRetrieverBody');
-                    if (eb) eb.innerHTML = '<div class="layer-placeholder">未检索到相似形态（' + (resp.message || '数据不足') + '）</div>';
+                    console.warn('[Retriever] ' + name + ' 无结果:', resp.message);
+                    if (bodyEl) bodyEl.innerHTML = '<div class="layer-placeholder">未检索到相似形态（' + (resp.message || '数据不足') + '）</div>';
+                    if (statusEl) { statusEl.textContent = '无结果'; statusEl.className = 'rr-status fail'; }
                 }
             } catch(e) {
-                console.error('[KNN] parse error', e);
+                console.error('[Retriever] parse error', e);
+                if (statusEl) { statusEl.textContent = '解析异常'; statusEl.className = 'rr-status fail'; }
             }
+        } else {
+            if (statusEl) { statusEl.textContent = '失败 ' + xhr.status; statusEl.className = 'rr-status fail'; }
         }
     };
-    xhr.onerror = function(e) { console.error('[KNN] onerror', e); };
+    xhr.onerror = function(e) {
+        console.error('[Retriever] onerror', e);
+        if (statusEl) { statusEl.textContent = '网络错误'; statusEl.className = 'rr-status fail'; }
+    };
     xhr.send(JSON.stringify(payload));
 }
 
-/** 渲染 KNN 相似历史形态卡片到证据层（② 相似形态检索） */
-function renderKNNAndLoading() {
-    var el = document.getElementById('layerRetrieverBody');
-    if (el) el.innerHTML = window._knnCard || '<div class="layer-placeholder">未检索到相似形态</div>';
-}
-
-/** 生成 KNN 相似历史形态卡片 HTML（纯卡片，不含 header） */
-function buildKNNCard(cases) {
+/** 生成相似历史形态卡片 HTML（纯卡片，不含 header）；name 决定底部相似度说明文案 */
+function buildKNNCard(cases, name) {
     var html = '';
 
     var fwds = [];
@@ -420,7 +441,10 @@ function buildKNNCard(cases) {
     html += ' · 正收益占比 <b>' + posCnt + '/' + cases.length + '</b>';
     html += '</div>';
     html += html2;
-    html += '<div class="knn-note">相似度按最近15根K线的形态特征（60维）计算，仅取目标窗口开始日之前的先例；收益为历史复盘参考，不代表未来。</div>';
+    var note = (name === 'gru')
+        ? '相似度按 GRU 学习嵌入的余弦相似度计算（越接近 1 越相似）；收益为历史复盘参考，不代表未来。'
+        : '相似度按最近15根K线的形态特征（60维）计算（距离越小越相似）；收益为历史复盘参考，不代表未来。';
+    html += '<div class="knn-note">' + note + '</div>';
     html += '</div>';
     return html;
 }

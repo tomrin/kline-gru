@@ -91,7 +91,28 @@
                                 <span class="layer-meta" id="layerRetrieverMeta">KNN · 约1秒</span>
                             </div>
                             <div class="layer-body" id="layerRetrieverBody">
-                                <div class="layer-placeholder">点「深度讲评」后检索历史相似形态</div>
+                                <!-- KNN 结果区：点击上方 KNN 按钮直接检索，结果保留 -->
+                                <div class="retriever-result" id="rrKnn">
+                                    <div class="rr-head">
+                                        <span class="rr-tag tag-knn">KNN</span>
+                                        <span class="rr-sub">欧氏距离 · 60维特征</span>
+                                        <span class="rr-status" id="knnStatus">未检索</span>
+                                    </div>
+                                    <div class="rr-body" id="knnResultBody">
+                                        <div class="layer-placeholder">点上方「KNN」按钮检索</div>
+                                    </div>
+                                </div>
+                                <!-- GRU 结果区：点击上方 GRU 按钮直接检索，结果保留 -->
+                                <div class="retriever-result" id="rrGru">
+                                    <div class="rr-head">
+                                        <span class="rr-tag tag-gru">GRU</span>
+                                        <span class="rr-sub">学习嵌入 · 余弦相似度</span>
+                                        <span class="rr-status" id="gruStatus">未检索</span>
+                                    </div>
+                                    <div class="rr-body" id="gruResultBody">
+                                        <div class="layer-placeholder">点上方「GRU」按钮检索</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="layer" id="layerLLM">

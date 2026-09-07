@@ -417,6 +417,49 @@ body {
     color: #0f1a18;
     font-weight: 700;
 }
+
+/* 检索结果区（KNN / GRU 各自独立，结果同时保留可对比） */
+.retriever-result {
+    border: 1px solid #2c2c2c;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    overflow: hidden;
+}
+.retriever-result:last-child { margin-bottom: 0; }
+.rr-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: #1e1e1e;
+    border-bottom: 1px solid #2c2c2c;
+}
+.rr-tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+    flex: none;
+}
+.tag-knn { background: #1abc9c; color: #0f1a18; }
+.tag-gru { background: #9b59b6; color: #f3e8ff; }
+.rr-sub {
+    font-size: 10px;
+    color: #666;
+    flex: 1;
+}
+.rr-status {
+    font-size: 10px;
+    color: #888;
+    flex: none;
+}
+.rr-status.running { color: #f39c12; }
+.rr-status.done { color: #1abc9c; }
+.rr-status.fail { color: #e74c3c; }
+.rr-body {
+    padding: 6px 8px;
+    min-height: 24px;
+}
 .layer-body {
     padding: 8px 10px;
     min-height: 40px;
