@@ -14,6 +14,7 @@
 可选：
     --top N         相似案例数（默认 5）
     --before        只取目标窗口之前的先例（推荐）
+    --retriever     相似案例检索路线：knn / gru（默认 config.RETRIEVER）
     --call          生成 prompt 后直接调用 Kimi API
     --model         覆盖 config.KIMI_MODEL
 """
@@ -36,6 +37,33 @@ from features import feature_vector
 from retrieve import load_index, retrieve
 
 ROOT = Path(os.path.dirname(os.path.abspath(__file__)))
+
+ROUTE_LABELS = {'knn': 'KNN（欧氏距离）', 'gru': 'GRU（学习嵌入余弦相似度）'}
+METRIC_NAMES = {'knn': '形态距离', 'gru': '相似度'}
+
+
+def retrieve_cases(route: str, win_rows: list[dict], code: str, top: int,
+                   before: bool) -> tuple[list, str, str]:
+    """按指定路线检索相似历史案例，返回 (cases, metric_name, route_label)。"""
+    start = str(win_rows[0]["date"])
+    end = str(win_rows[-1]["date"])
+    exclude = (code, start, end)
+    before_date = start if before else None
+
+    if route == 'gru':
+        from gru_retrieve import (load_model, load_index as gru_load_index,
+                                  retrieve as gru_retrieve, encode_target)
+        model = load_model()
+        X, metas = gru_load_index()
+        emb = encode_target(model, win_rows)
+        cases = gru_retrieve(X, metas, emb, top, exclude_self=exclude, before_date=before_date)
+        return cases, METRIC_NAMES['gru'], ROUTE_LABELS['gru']
+
+    from retrieve import load_index, retrieve
+    X, metas = load_index()
+    vec = np.asarray(feature_vector(win_rows), dtype=np.float32).reshape(1, -1)
+    cases = retrieve(X, metas, vec, top, exclude_self=exclude, before_date=before_date)
+    return cases, METRIC_NAMES['knn'], ROUTE_LABELS['knn']
 
 
 def parse_date(value: str) -> str:
@@ -72,14 +100,16 @@ def fmt_kline_rows(rows: list[dict]) -> list[str]:
 
 
 def build_review_prompt(code: str, name: str, win_rows: list[dict],
-                        cluster_info: dict, cases: list[tuple[float, dict]]) -> str:
+                        cluster_info: dict, cases: list[tuple[float, dict]],
+                        metric_name: str = '形态距离',
+                        route_label: str = 'KNN（欧氏距离）') -> str:
     """组装讲评 prompt。"""
     L: list[str] = []
     L.append("你是一位资深 A 股技术形态分析师，擅长结合历史相似形态做复盘讲评。")
     L.append("")
     L.append("【任务背景】")
-    L.append("这是 K 线形态研究工具（kline-cluster）的讲评请求。系统已用无监督聚类(K-means)和")
-    L.append("最近邻检索(k-NN)，为下方目标形态找到了历史相似案例。请结合这些相似案例讲评，")
+    L.append("这是 K 线形态研究工具的讲评请求。系统已用无监督聚类(K-means)和")
+    L.append("最近邻相似检索，为下方目标形态找到了历史相似案例。请结合这些相似案例讲评，")
     L.append("重点回答：这段形态历史上像什么、那些相似案例之后通常怎么走。")
     L.append("")
     L.append(f"【目标股票与时间段】")
@@ -98,11 +128,11 @@ def build_review_prompt(code: str, name: str, win_rows: list[dict],
     L.append(f"- 代表形态：{cluster_info['rep_name']}({cluster_info['rep_code']}) "
              f"{cluster_info['rep_start']}-{cluster_info['rep_end']}")
     L.append("")
-    L.append(f"【最相似历史案例（k-NN 检索，前 {len(cases)} 例）】")
+    L.append(f"【最相似历史案例（{route_label}，前 {len(cases)} 例）】")
     for rank, (dist, m) in enumerate(cases, 1):
         fwd = f"{m['forward']*100:+.2f}%" if m["forward"] is not None else "N/A"
         exc = f"{m['excess']*100:+.2f}%" if m["excess"] is not None else "N/A"
-        L.append(f"#{rank} {m['code']} {m['name']} {m['start']}-{m['end']}（形态距离{dist:.2f}）")
+        L.append(f"#{rank} {m['code']} {m['name']} {m['start']}-{m['end']}（{metric_name}{dist:.2f}）")
         L.append(f"   该案例后续 {config.FORWARD_DAYS} 日：绝对收益 {fwd}，超额收益 {exc}")
     L.append("")
     L.append("【讲评要求】")
@@ -157,6 +187,8 @@ def main() -> int:
     parser.add_argument("--end-date", required=True, help="结束日期 YYYYMMDD")
     parser.add_argument("--top", type=int, default=5, help="相似案例数")
     parser.add_argument("--before", action="store_true", help="只取目标窗口之前的先例")
+    parser.add_argument("--retriever", choices=["knn", "gru"], default=config.RETRIEVER,
+                        help="相似案例检索路线：knn / gru")
     parser.add_argument("--call", action="store_true", help="生成后直接调用 Kimi")
     parser.add_argument("--model", default=None, help="覆盖 config.KIMI_MODEL")
     args = parser.parse_args()
@@ -166,11 +198,10 @@ def main() -> int:
     data_dir = ROOT / config.KLINE_DIR
     window = config.WINDOW
 
-    # 加载 K-means 模型 + KNN 检索库
+    # 加载 K-means 模型
     model_pack = load_kmeans_model()
     model = model_pack["model"]
     stats = {s["cluster_id"]: s for s in model_pack["stats"]}
-    X, metas = load_index()
 
     loaded = cl.load_stock_file(data_dir / f"{code}.json")
     if loaded is None:
@@ -214,13 +245,11 @@ def main() -> int:
         "rep_end": s["rep_end"],
     }
 
-    # KNN 找相似案例
-    exclude = (code, str(win_rows[0]["date"]), str(win_rows[-1]["date"]))
-    before = start if args.before else None
-    cases = retrieve(X, metas, vec, args.top, exclude_self=exclude, before_date=before)
+    # 相似案例检索（knn 或 gru，同层级可切换）
+    cases, metric_name, route_label = retrieve_cases(args.retriever, win_rows, code, args.top, args.before)
 
     # 组装 prompt
-    prompt = build_review_prompt(code, name, win_rows, cluster_info, cases)
+    prompt = build_review_prompt(code, name, win_rows, cluster_info, cases, metric_name, route_label)
 
     out_dir = ROOT / "output"
     out_dir.mkdir(parents=True, exist_ok=True)
