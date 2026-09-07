@@ -64,7 +64,8 @@ def spearman(a: np.ndarray, b: np.ndarray) -> float:
 
 def collect_windows(data_dir: Path, window: int, step: int, forward_days: int,
                     max_windows: int | None, seed: int):
-    """遍历全市场窗口，返回 (seq, flat, excess, metas)。"""
+    """遍历全市场窗口，返回 (seq, flat, excess, metas)。
+    metas 字典附 stock_id 与 tidx（供 InfoNCE 训练用）。"""
     from benchmark import get_or_build_benchmark
     benchmark = get_or_build_benchmark(data_dir)
 
@@ -77,12 +78,18 @@ def collect_windows(data_dir: Path, window: int, step: int, forward_days: int,
     rng = random.Random(seed)
     rng.shuffle(paths)  # 打乱股票顺序，避免 --max-windows 只采到字母序靠前的股票
 
+    stock_id_map: dict[str, int] = {}      # 股票代码 → 全局 id
+    stock_counter: dict[str, int] = {}     # 股票代码 → 当前窗口计数（即 tidx）
+
     started = time.perf_counter()
     for pidx, path in enumerate(paths, 1):
         loaded = cl.load_stock_file(path)
         if loaded is None:
             continue
         code, name, rows = loaded
+        if code not in stock_id_map:
+            stock_id_map[code] = len(stock_id_map)
+        stock_counter[code] = 0
         for i in range(0, len(rows) - window + 1, step):
             win = rows[i:i + window]
             seq = feature_matrix(win)
@@ -96,7 +103,10 @@ def collect_windows(data_dir: Path, window: int, step: int, forward_days: int,
                 "start": str(win[0]["date"]), "end": str(win[-1]["date"]),
                 "forward": fwd if fwd is not None else None,
                 "excess": excess if excess is not None else None,
+                "stock_id": stock_id_map[code],
+                "tidx": stock_counter[code],
             })
+            stock_counter[code] += 1
             if max_windows and len(seqs) >= max_windows:
                 break
         if max_windows and len(seqs) >= max_windows:
@@ -126,8 +136,16 @@ def time_split(n: int, train_frac: float, val_frac: float):
     return np.arange(n_train), np.arange(n_train, n_train + n_val), np.arange(n_train + n_val, n)
 
 
-def train_gru(seq, excess, train_idx, val_idx, cfg, device):
-    """训练 GRU（早停），返回 (model, y_mean, y_std)。标签为标准化后的超额收益。"""
+def train_gru(seq, excess, train_idx, val_idx, cfg, device,
+              stock: np.ndarray | None = None,
+              tidx: np.ndarray | None = None,
+              direction: np.ndarray | None = None):
+    """训练 GRU（早停），返回 (model, y_mean, y_std)。标签为标准化后的超额收益。
+
+    当 cfg["USE_INFONCE"]=True 时启用 InfoNCE 联合损失（正样本策略由
+    cfg["INFONCE_USE_DIRECTION"] 决定：False=同股票时间近邻，True=涨/跌同向）。
+    此时 stock/tidx/direction 必须提供。
+    """
     import torch
     import torch.nn as nn
     import torch.optim as optim
@@ -139,7 +157,19 @@ def train_gru(seq, excess, train_idx, val_idx, cfg, device):
         lr=float(cfg.get("GRU_LR", 1e-3)),
         weight_decay=float(cfg.get("GRU_WEIGHT_DECAY", 1e-4)),
     )
-    loss_fn = nn.MSELoss()
+
+    use_infonce = bool(cfg.get("USE_INFONCE", False))
+    if use_infonce:
+        from losses import joint_loss
+        mse_w = float(cfg.get("INFONCE_MSE_WEIGHT", 0.5))
+        nce_w = float(cfg.get("INFONCE_WEIGHT", 0.5))
+        tau = float(cfg.get("INFONCE_TAU", 0.1))
+        max_diff = int(cfg.get("INFONCE_MAX_POS_TIME_DIFF", 5))
+        use_dir = bool(cfg.get("INFONCE_USE_DIRECTION", False))
+        print(f"[train] InfoNCE 联合损失启用：{mse_w}·MSE + {nce_w}·InfoNCE, "
+              f"τ={tau}, pos_strategy={'涨/跌同向' if use_dir else '同股票时间近邻'}", flush=True)
+        if direction is None:
+            raise ValueError("use_infonce=True 时必须提供 direction 数组")
 
     # 只用有前向超额收益（标签非 NaN）的窗口做监督
     tr_mask = ~np.isnan(excess[train_idx])
@@ -148,6 +178,12 @@ def train_gru(seq, excess, train_idx, val_idx, cfg, device):
     ytr = excess[train_idx][tr_mask].astype(np.float32)
     Xva = seq[val_idx][va_mask]
     yva = excess[val_idx][va_mask].astype(np.float32)
+
+    # 配套的 stock / tidx / direction（仅训练阶段需要）
+    if use_infonce:
+        stock_tr = stock[train_idx][tr_mask]
+        tidx_tr = tidx[train_idx][tr_mask]
+        dir_tr = direction[train_idx][tr_mask]
 
     if len(Xtr) == 0 or len(Xva) == 0:
         raise RuntimeError("训练/验证集为空，请增大数据量或检查前向收益是否可计算")
@@ -178,8 +214,17 @@ def train_gru(seq, excess, train_idx, val_idx, cfg, device):
             idx = perm[i:i + batch]
             xb = torch.from_numpy(Xtr[idx]).to(device)
             yb = torch.from_numpy(ytr_n[idx]).to(device)
-            pred, _ = model(xb)
-            loss = loss_fn(pred, yb)
+            pred, emb = model(xb)
+            if use_infonce:
+                sb = torch.from_numpy(stock_tr[idx]).to(device)
+                tb = torch.from_numpy(tidx_tr[idx]).to(device)
+                db = torch.from_numpy(dir_tr[idx]).to(device) if use_dir else None
+                loss, _ = joint_loss(pred, yb, emb, sb, tb,
+                                     mse_weight=mse_w, infonce_weight=nce_w,
+                                     tau=tau, max_pos_time_diff=max_diff,
+                                     directions=db)
+            else:
+                loss = nn.functional.mse_loss(pred, yb)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -189,9 +234,9 @@ def train_gru(seq, excess, train_idx, val_idx, cfg, device):
         model.eval()
         with torch.no_grad():
             pred, _ = model(torch.from_numpy(Xva).to(device))
-            val_loss = float(loss_fn(pred, torch.from_numpy(yva_n).to(device)).item())
+            val_loss = float(nn.functional.mse_loss(pred, torch.from_numpy(yva_n).to(device)).item())
 
-        print(f"[train] epoch {ep + 1:>3}/{epochs}  train_mse={train_loss:.6f}  val_mse={val_loss:.6f}",
+        print(f"[train] epoch {ep + 1:>3}/{epochs}  train_loss={train_loss:.6f}  val_mse={val_loss:.6f}",
               flush=True)
         if val_loss < best_val - 1e-6:
             best_val = val_loss
@@ -236,12 +281,35 @@ def main() -> int:
     parser.add_argument("--hidden", type=int, default=None, help="覆盖 config.GRU_HIDDEN")
     parser.add_argument("--dropout", type=float, default=None, help="覆盖 config.GRU_DROPOUT")
     parser.add_argument("--device", default="auto", help="auto / cuda / cpu")
+    # InfoNCE 联合损失选项（实验性；详见 infonce-compare 项目）
+    parser.add_argument("--use-infonce", action="store_true",
+                        help="启用 InfoNCE 联合损失（除 MSE 外加 InfoNCE 项）")
+    parser.add_argument("--infonce-weight", type=float, default=None,
+                        help="InfoNCE 权重（联合损失系数）")
+    parser.add_argument("--infonce-mse-weight", type=float, default=None,
+                        help="MSE 权重（默认 1 - infonce-weight）")
+    parser.add_argument("--infonce-tau", type=float, default=None,
+                        help="InfoNCE 温度 τ")
+    parser.add_argument("--use-direction", action="store_true",
+                        help="InfoNCE 正样本=涨/跌同向（SimCLR 风格），否则用同股票时间近邻")
     args = parser.parse_args()
 
     cfg = dict(vars(config))
     cfg["GRU_EPOCHS"] = args.epochs or cfg.get("GRU_EPOCHS", 30)
     cfg["GRU_HIDDEN"] = args.hidden or cfg.get("GRU_HIDDEN", 32)
     cfg["GRU_DROPOUT"] = args.dropout if args.dropout is not None else cfg.get("GRU_DROPOUT", 0.3)
+    # InfoNCE 配置
+    cfg["USE_INFONCE"] = bool(args.use_infonce)
+    if args.use_infonce:
+        if args.infonce_weight is not None:
+            cfg["INFONCE_WEIGHT"] = args.infonce_weight
+        if args.infonce_mse_weight is not None:
+            cfg["INFONCE_MSE_WEIGHT"] = args.infonce_mse_weight
+        else:
+            cfg["INFONCE_MSE_WEIGHT"] = 1.0 - cfg.get("INFONCE_WEIGHT", 0.5)
+        if args.infonce_tau is not None:
+            cfg["INFONCE_TAU"] = args.infonce_tau
+        cfg["INFONCE_USE_DIRECTION"] = bool(args.use_direction)
 
     import torch
     if args.device == "auto":
@@ -270,7 +338,14 @@ def main() -> int:
     train_idx, val_idx, test_idx = time_split(len(metas), train_frac, val_frac)
     print(f"[split] 按结束日期切分：train={len(train_idx)} val={len(val_idx)} test={len(test_idx)}")
 
-    model, y_mean, y_std = train_gru(seq, excess, train_idx, val_idx, cfg, device)
+    # 提取 stock / tidx / direction（InfoNCE 需要；从 metas 字典与 excess 标签构造）
+    stock = np.asarray([m["stock_id"] for m in metas], dtype=np.int64)
+    tidx = np.asarray([m["tidx"] for m in metas], dtype=np.int64)
+    # direction：excess > 0 → 1（涨），< 0 → 0（跌），NaN → 0（不参与正样本构造但不影响）
+    direction = np.where(np.isnan(excess), 0, (excess > 0).astype(np.int64))
+
+    model, y_mean, y_std = train_gru(seq, excess, train_idx, val_idx, cfg, device,
+                                      stock=stock, tidx=tidx, direction=direction)
 
     # 测试集评估（held-out 时间切片，诚实指标）
     print("\n[eval] 测试集（时间上最后一段，模型从未见过）：")
