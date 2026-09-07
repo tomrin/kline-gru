@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K线训练营</title>
+    <link rel="stylesheet" href="css/style.css?v=250903b">
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部导航栏 -->
+        <header id="topBar">
+            <div class="top-left">
+                <button id="btnMode" class="mode-btn active">训练营模式</button>
+            </div>
+            <div class="top-right">
+                <button id="btnHistory" class="top-btn"> 我的记录</button>
+                <button id="btnRanking" class="top-btn">🏆 排行榜</button>
+            </div>
+        </header>
+
+        <!-- 主体布局 -->
+        <div id="mainLayout">
+            <!-- 左侧栏 -->
+            <aside id="leftSidebar">
+                <!-- 用户信息 -->
+                <div class="user-card" id="userCard" style="cursor:pointer;">
+                    <div class="avatar">🐂</div>
+                    <div class="user-id" id="userId">点击登录</div>
+                </div>
+
+                <!-- 统计数据 -->
+                <div class="stats-card">
+                    <div class="stat-row">
+                        <span class="stat-label">总收益:</span>
+                        <span class="stat-value up" id="statTotalProfit">0.00万</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">周收益:</span>
+                        <span class="stat-value up" id="statWeeklyProfit">0.00万</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">成功率:</span>
+                        <span class="stat-value up" id="statWinRate">0.00%</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">训练次数:</span>
+                        <span class="stat-value" id="statPlayCount">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label" style="color:#3498db;">AI准确率:</span>
+                        <span class="stat-value" id="statAIAccuracy" style="color:#3498db;">0%</span>
+                    </div>
+                </div>
+
+                <!-- 当前回合信息 -->
+                <div class="round-info" id="roundInfo">
+                    <div class="round-header">当前回合</div>
+                    <div class="round-step" id="roundStep">0 / 30</div>
+                    <div class="round-progress">
+                        <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                    </div>
+                </div>
+
+                <!-- 智能讲评 -->
+                <div class="commentary-section">
+                    <div class="commentary-title">
+                        <span>📝 智能讲评</span>
+                        <button id="btnAIAnalysis" class="ai-btn" title="触发相似形态检索 + 大模型深度讲评（规则引擎每步自动分析）">🤖 深度讲评</button>
+                    </div>
+                    <div id="commentaryContent" class="commentary-content">
+                        <!-- 三层结构：规则引擎（底座）/ 相似形态检索（证据）/ 深度讲评（讲解） -->
+                        <div class="layer" id="layerRule">
+                            <div class="layer-head">
+                                <span class="layer-dot dot-rule"></span>
+                                <span class="layer-name">① 规则引擎</span>
+                                <span class="layer-meta" id="layerRuleMeta">本地 · 毫秒级</span>
+                            </div>
+                            <div class="layer-body" id="layerRuleBody">
+                                <div class="layer-placeholder">每步K线自动分析</div>
+                            </div>
+                        </div>
+                        <div class="layer" id="layerRetriever">
+                            <div class="layer-head">
+                                <span class="layer-dot dot-retriever"></span>
+                                <span class="layer-name">② 相似形态检索</span>
+                                <span class="layer-meta" id="layerRetrieverMeta">KNN · 约1秒</span>
+                            </div>
+                            <div class="layer-body" id="layerRetrieverBody">
+                                <div class="layer-placeholder">点「深度讲评」后检索历史相似形态</div>
+                            </div>
+                        </div>
+                        <div class="layer" id="layerLLM">
+                            <div class="layer-head">
+                                <span class="layer-dot dot-llm"></span>
+                                <span class="layer-name">③ 深度讲评</span>
+                                <span class="layer-meta" id="layerLLMMeta">kimi-k3 · 约30-40秒</span>
+                            </div>
+                            <div class="layer-body" id="layerLLMBody">
+                                <div class="layer-placeholder">大模型深度分析（点「深度讲评」生成）</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 中间主区域 -->
+            <main id="chartArea">
+                <!-- OHLC信息行 -->
+                <div class="info-bar" id="infoBar">
+                    <div class="ma-labels">
+                        <span class="ma-label ma5" id="ma5Label">MA5:--</span>
+                        <span class="ma-label ma10" id="ma10Label">MA10:--</span>
+                        <span class="ma-label ma20" id="ma20Label">MA20:--</span>
+                    </div>
+                    <div class="ohlc-info">
+                        <span>开: <b id="infoOpen">--</b></span>
+                        <span>高: <b id="infoHigh">--</b></span>
+                        <span>低: <b id="infoLow">--</b></span>
+                        <span>收: <b id="infoClose">--</b></span>
+                        <span>涨跌: <b id="infoChange">--</b></span>
+                        <span>涨幅: <b id="infoChangePct">--</b></span>
+                    </div>
+                </div>
+
+                <div class="chart-wrapper">
+                    <div class="chart-column">
+                        <!-- K线主图 -->
+                        <div id="klineMainChart"></div>
+
+                        <!-- 成交量副图 -->
+                        <div id="volumeChart"></div>
+
+                        <!-- 指标量副图 -->
+                        <div id="indicatorChart"></div>
+
+                        <!-- 指标切换栏 -->
+                        <div class="indicator-switcher" id="indicatorSwitcher">
+                            <button class="ind-btn active" data-indicator="MACD">MACD</button>
+                            <button class="ind-btn" data-indicator="KDJ">KDJ</button>
+                            <button class="ind-btn" data-indicator="RSI">RSI</button>
+                            <button class="ind-btn" data-indicator="BOLL">BOLL</button>
+                            <button class="ind-btn" data-indicator="W&R">W&R</button>
+                            <button class="ind-btn" data-indicator="ASI">ASI</button>
+                            <button class="ind-btn" data-indicator="BIAS">BIAS</button>
+                            <button class="ind-btn" data-indicator="VR">VR</button>
+                        </div>
+                    </div>
+
+                    <!-- 右侧指标数值面板 -->
+                    <aside class="right-panel" id="rightPanel">
+                        <div class="panel-section">
+                            <div class="panel-title">价格</div>
+                            <div class="panel-row"><span class="pl">今开</span><span class="pv" id="rpOpen">--</span></div>
+                            <div class="panel-row"><span class="pl">最高</span><span class="pv" id="rpHigh">--</span></div>
+                            <div class="panel-row"><span class="pl">最低</span><span class="pv" id="rpLow">--</span></div>
+                            <div class="panel-row"><span class="pl">收盘</span><span class="pv" id="rpClose">--</span></div>
+                            <div class="panel-row"><span class="pl">涨跌</span><span class="pv" id="rpChange">--</span></div>
+                            <div class="panel-row"><span class="pl">涨幅</span><span class="pv" id="rpChangePct">--</span></div>
+                        </div>
+
+                        <div class="panel-section">
+                            <div class="panel-title">均线</div>
+                            <div class="panel-row"><span class="pl ma5-c">MA5</span><span class="pv" id="rpMA5">--</span></div>
+                            <div class="panel-row"><span class="pl ma10-c">MA10</span><span class="pv" id="rpMA10">--</span></div>
+                            <div class="panel-row"><span class="pl ma20-c">MA20</span><span class="pv" id="rpMA20">--</span></div>
+                        </div>
+
+                        <div class="panel-section" id="rpMacdSection">
+                            <div class="panel-title">MACD</div>
+                            <div class="panel-row"><span class="pl">DIF</span><span class="pv" id="rpDIF">--</span></div>
+                            <div class="panel-row"><span class="pl">DEA</span><span class="pv" id="rpDEA">--</span></div>
+                            <div class="panel-row"><span class="pl">MACD</span><span class="pv" id="rpMACD">--</span></div>
+                        </div>
+
+                        <div class="panel-section" id="rpKdjSection">
+                            <div class="panel-title">KDJ</div>
+                            <div class="panel-row"><span class="pl">K</span><span class="pv" id="rpK">--</span></div>
+                            <div class="panel-row"><span class="pl">D</span><span class="pv" id="rpD">--</span></div>
+                            <div class="panel-row"><span class="pl">J</span><span class="pv" id="rpJ">--</span></div>
+                        </div>
+
+                        <div class="panel-section" id="rpRsiSection">
+                            <div class="panel-title">RSI</div>
+                            <div class="panel-row"><span class="pl">RSI6</span><span class="pv" id="rpRSI6">--</span></div>
+                        </div>
+                    </aside>
+                </div>
+            </main>
+        </div>
+
+        <!-- 底部操作栏 -->
+        <div id="bottomBar">
+            <div class="bottom-left">
+                <div class="game-profit">
+                    <span class="profit-label">本局收益率:</span>
+                    <span class="profit-value" id="gameProfit">0.00%</span>
+                </div>
+                <div class="position-info">
+                    <span id="positionText">空仓</span>
+                    <span id="cashText">现金: 10.00万</span>
+                </div>
+            </div>
+            <div class="bottom-right">
+                <button id="btnBuy" class="action-btn buy-btn">📈 买入</button>
+                <button id="btnWait" class="action-btn wait-btn">👀 观望</button>
+                <button id="btnStart" class="action-btn start-btn">🎮 开始训练</button>
+            </div>
+        </div>
+
+        <!-- 欢迎遮罩 -->
+        <div id="welcomeOverlay" class="overlay">
+            <div class="welcome-card">
+                <div class="welcome-icon">🎯</div>
+                <h2>K线训练营</h2>
+                <p>随机抽取A股历史走势，隐藏股票名称和日期</p>
+                <p>逐根K线做出买卖决策，训练你的K线识别能力</p>
+                <div class="welcome-features">
+                    <div class="feature">📊 真实A股数据</div>
+                    <div class="feature"> 每步智能讲评</div>
+                    <div class="feature">📈 多维收益结算</div>
+                </div>
+                <button id="btnStartBig" class="start-btn-large">🚀 开始训练</button>
+            </div>
+        </div>
+
+        <!-- 结算弹窗 -->
+        <div id="settlementModal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>🏆 训练结算</h2>
+                    <button id="btnCloseModal" class="btn-close">✕</button>
+                </div>
+                <div class="modal-body" id="settlementContent"></div>
+                <div class="modal-chart">
+                    <h3>📈 资产曲线对比</h3>
+                    <div id="assetCurve" style="height:250px;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-primary" id="btnPlayAgain">🔄 再来一局</button>
+                    <button class="btn-secondary" id="btnCloseBtn">返回首页</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 用户登录/注册弹窗 -->
+        <div id="userModal" class="modal" style="display:none;">
+            <div class="modal-content" style="max-width:360px;">
+                <div class="modal-header">
+                    <h2>用户登录</h2>
+                    <button class="btn-close" onclick="closeUserModal()">✕</button>
+                </div>
+                <div class="modal-body" style="text-align:center;padding:30px 20px;">
+                    <div style="font-size:48px;margin-bottom:12px;">🐂</div>
+                    <input type="text" id="userNameInput" placeholder="输入用户名" style="width:80%;padding:10px 14px;border:1px solid #444;border-radius:6px;background:#333;color:#fff;font-size:16px;text-align:center;margin-bottom:12px;">
+                    <div id="userMsg" style="font-size:12px;color:#888;margin-bottom:12px;">输入用户名登录或注册新用户</div>
+                    <button class="btn-primary" onclick="doLogin()" style="padding:10px 40px;font-size:16px;">登录 / 注册</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 我的记录弹窗 -->
+        <div id="recordsModal" class="modal" style="display:none;">
+            <div class="modal-content" style="max-width:700px;">
+                <div class="modal-header">
+                    <h2>我的记录</h2>
+                    <button class="btn-close" onclick="closeRecordsModal()">✕</button>
+                </div>
+                <div class="modal-body" id="recordsContent" style="max-height:400px;overflow-y:auto;">
+                    <div style="text-align:center;color:#888;padding:30px;">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 排行榜弹窗 -->
+        <div id="leaderboardModal" class="modal" style="display:none;">
+            <div class="modal-content" style="max-width:600px;">
+                <div class="modal-header">
+                    <h2>🏆 排行榜</h2>
+                    <button class="btn-close" onclick="closeLeaderboardModal()">✕</button>
+                </div>
+                <div class="modal-body" id="leaderboardContent" style="max-height:400px;overflow-y:auto;">
+                    <div style="text-align:center;color:#888;padding:30px;">加载中...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 消息提示 -->
+        <div id="message" class="toast" style="display:none;"></div>
+    </div>
+
+    <!-- 脚本 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/game-engine.js?v=250903b"></script>
+    <script src="js/kline-chart.js?v=250903b"></script>
+    <script src="js/kline-analysis.js?v=250903b"></script>
+    <script src="js/app.js?v=250903b"></script>
+</body>
+</html>

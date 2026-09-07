@@ -1,0 +1,23 @@
+# kline-gru（基于 kline-studio，融合 GRU 检索器）依赖
+
+# 数据接口（Tushare Pro）
+tushare>=1.0.0
+# akshare>=1.14.0   # 可选：训练营 data_fetcher.py 的 AKShare 备用方案
+
+# 数据处理
+pandas>=1.5.0
+numpy>=1.24.0
+
+# 聚类分析
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# 绘图
+matplotlib>=3.7.0
+
+# HTTP 请求
+requests>=2.31.0
+
+# GRU 路线（路线2）深度学习依赖
+# 建议用 conda 安装对应 CUDA 版本：conda install pytorch pytorch-cuda=11.8 -c pytorch -c nvidia
+torch>=2.0.0

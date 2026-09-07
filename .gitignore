@@ -1,0 +1,27 @@
+# 密钥与本地数据（只忽略根目录，避免误伤 web/data 等子目录）
+config.py
+config.py.bak
+/data/
+/models/
+/output/
+/reports/
+
+# 日志
+/logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+venv_lib/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+Thumbs.db
