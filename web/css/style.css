@@ -393,6 +393,30 @@ body {
     font-size: 10px;
     color: #777;
 }
+.retriever-switch {
+    display: inline-flex;
+    margin-left: auto;
+    gap: 0;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    overflow: hidden;
+    flex: none;
+}
+.retriever-btn {
+    font-size: 10px;
+    padding: 2px 8px;
+    background: #2a2a2a;
+    color: #999;
+    border: none;
+    cursor: pointer;
+    line-height: 1.4;
+}
+.retriever-btn:hover { color: #ddd; background: #333; }
+.retriever-btn.active {
+    background: #1abc9c;
+    color: #0f1a18;
+    font-weight: 700;
+}
 .layer-body {
     padding: 8px 10px;
     min-height: 40px;

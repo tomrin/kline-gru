@@ -16,7 +16,7 @@ from logging.handlers import RotatingFileHandler
 # 加载配置
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
-from engines import get_retriever, get_llm_provider
+from engines import get_retriever, get_llm_provider, RETRIEVERS
 
 # ==========================================
 # 日志配置
@@ -118,13 +118,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         """返回三层讲评引擎的元信息（规则引擎/相似形态检索/深度讲评）"""
         retriever = get_retriever()
         llm = get_llm_provider()
+        # 列出所有可用检索器（供前端切换），并标注当前默认
+        retriever_options = []
+        for name, cls in RETRIEVERS.items():
+            retriever_options.append({
+                'name': name,
+                'label': cls.label,
+                'current': (name == getattr(config, 'RETRIEVER', 'knn')),
+            })
         response = {
             'success': True,
             'layers': {
                 'rule': {'name': 'rule', 'label': '规则引擎', 'latency': '毫秒级'},
                 'retriever': retriever.meta(),
                 'llm': llm.meta(),
-            }
+            },
+            'retrievers': retriever_options,
         }
         self.send_response(200)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -159,9 +168,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             position_info = data.get('positionInfo', '空仓')
             ai_learning = data.get('aiLearning', '')
             stock_code = data.get('stockCode', '') or ''
+            retriever_name = data.get('retriever', '') or ''
 
-            # 编排：先证据层检索相似形态，再讲解层生成深度讲评（引擎由 config 选择，可插拔）
-            retriever = get_retriever()
+            # 编排：先证据层检索相似形态，再讲解层生成深度讲评（引擎可插拔，前端可指定）
+            retriever = get_retriever(retriever_name)
             llm = get_llm_provider()
             knn_cases = retriever.retrieve(kline_data, stock_code, top=5)
             result = llm.analyze(kline_data, current_index, position_info, ai_learning,
@@ -185,7 +195,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             data = json.loads(body.decode('utf-8'))
             kline_data = data.get('klineData', [])
             stock_code = data.get('stockCode', '') or ''
-            cases = get_retriever().retrieve(kline_data, stock_code, top=5)
+            retriever_name = data.get('retriever', '') or ''
+            cases = get_retriever(retriever_name).retrieve(kline_data, stock_code, top=5)
             if cases:
                 response = {
                     'success': True,

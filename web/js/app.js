@@ -64,8 +64,42 @@ function loadEngines() {
             var layers = d.layers;
             setLayerMeta('layerRetrieverMeta', layers.retriever);
             setLayerMeta('layerLLMMeta', layers.llm);
+            // 初始化检索器切换按钮（KNN / GRU），高亮后端默认项
+            if (d.retrievers && d.retrievers.length) {
+                var def = null;
+                for (var i = 0; i < d.retrievers.length; i++) {
+                    if (d.retrievers[i].current) def = d.retrievers[i].name;
+                }
+                window._retriever = def || 'knn';
+                setRetrieverSwitch(window._retriever);
+            }
         })
         .catch(function(e) { console.warn('[engines] 加载引擎信息失败:', e); });
+}
+
+/** 高亮检索器切换按钮 + 记录当前选择（KNN / GRU） */
+function setRetrieverSwitch(name) {
+    window._retriever = name;
+    var btns = document.querySelectorAll('#retrieverSwitch .retriever-btn');
+    for (var i = 0; i < btns.length; i++) {
+        if (btns[i].getAttribute('data-retriever') === name) {
+            btns[i].classList.add('active');
+        } else {
+            btns[i].classList.remove('active');
+        }
+    }
+}
+
+/** 切换检索器（KNN / GRU），切换后需重新触发一次检索以生效 */
+function switchRetriever(name) {
+    if (window._retriever === name) return;
+    setRetrieverSwitch(name);
+    // 若已有检索结果，提示用户重新点「深度讲评」以用新检索器检索
+    var body = document.getElementById('layerRetrieverBody');
+    if (body && window._knnCard) {
+        body.innerHTML = '<div class="layer-placeholder">已切换到 ' + name.toUpperCase() + '，点「深度讲评」重新检索相似形态</div>';
+        window._knnCard = null;
+    }
 }
 
 /** 更新某层的引擎名+耗时标注 */
@@ -239,7 +273,8 @@ function callAIAnalysis(allKline, currentIndex, s) {
         positionInfo: posInfo,
         aiLearning: learningSummary,
         stockCode: s.stock.code,
-        stockName: s.stock.name
+        stockName: s.stock.name,
+        retriever: window._retriever || 'knn'
     };
     console.log('[AI] payload stock=', payload.stockCode, payload.stockName);
 
@@ -311,13 +346,14 @@ function callAIAnalysis(allKline, currentIndex, s) {
     console.log('[AI] xhr.send 已调用');
 }
 
-/** 秒级检索 KNN 相似历史形态并渲染（独立于 Kimi，避免长时间等待） */
+/** 秒级检索相似历史形态并渲染（独立于 Kimi，避免长时间等待） */
 function requestKNN(allKline, s, currentIndex) {
-    console.log('[KNN] 开始秒级检索');
+    console.log('[Retriever] 开始秒级检索, 当前检索器=', window._retriever || 'knn');
     window._knnCard = null;
     var payload = {
         klineData: allKline,
-        stockCode: s.stock.code
+        stockCode: s.stock.code,
+        retriever: window._retriever || 'knn'
     };
     var xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/knn', true);
@@ -1361,6 +1397,13 @@ function bindEvents() {
     $('userCard').addEventListener('click', openUserModal);
     $('btnHistory').addEventListener('click', openRecords);
     $('btnRanking').addEventListener('click', openLeaderboard);
+
+    // 检索器切换（KNN / GRU）
+    document.querySelectorAll('#retrieverSwitch .retriever-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            switchRetriever(this.getAttribute('data-retriever'));
+        });
+    });
 }
 
 // 启动
