@@ -66,7 +66,6 @@
                 <div class="commentary-section">
                     <div class="commentary-title">
                         <span>📝 智能讲评</span>
-                        <button id="btnAIAnalysis" class="ai-btn" title="触发相似形态检索 + 大模型深度讲评（规则引擎每步自动分析）">🤖 深度讲评</button>
                     </div>
                     <div id="commentaryContent" class="commentary-content">
                         <!-- 三层结构：规则引擎（底座）/ 相似形态检索（证据）/ 深度讲评（讲解） -->
@@ -119,6 +118,7 @@
                             <div class="layer-head">
                                 <span class="layer-dot dot-llm"></span>
                                 <span class="layer-name">③ 深度讲评</span>
+                                <button id="btnAIAnalysis" class="ai-btn" title="用当前选中的检索器（KNN/GRU）检索相似形态，并调用大模型生成深度讲评">🤖 深度讲评</button>
                                 <span class="layer-meta" id="layerLLMMeta">kimi-k3 · 约30-40秒</span>
                             </div>
                             <div class="layer-body" id="layerLLMBody">

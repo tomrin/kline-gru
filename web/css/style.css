@@ -187,6 +187,14 @@ body {
 }
 .ai-btn:hover { background: rgba(52, 152, 219, 0.3); }
 .ai-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* 深度讲评按钮置于「③ 深度讲评」栏头部，与上方 KNN/GRU 切换器同一水平位置 */
+.layer-head .ai-btn {
+    margin-left: auto;
+    font-size: 10px;
+    padding: 2px 8px;
+    line-height: 1.4;
+    flex: none;
+}
 .ai-btn.loading {
     border-color: #f39c12;
     color: #f39c12;
