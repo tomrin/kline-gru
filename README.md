@@ -68,6 +68,20 @@ pip install -r requirements.txt
 > 硬件：本机 Lenovo P53 + Quadro T1000（4GB）。小模型下 GPU/CPU 均可；全量 120 万窗口建议 GPU，
 > `--max-windows` 可快速冒烟。
 
+### 数据与模型不入库（新克隆必读）
+
+仓库**只含代码**，以下内容因体积过大被 `.gitignore` 排除，需按顺序本地重建：
+
+```powershell
+python fetch_data.py                  # 1. 拉取全市场日线 → data/kline/
+python retrieve.py --build            # 2. 构建 KNN 检索库 → models/knn_X.npy
+python gru_train.py                   # 3. 训练 GRU + 建索引 → models/gru.pt / gru_X.npy
+python byol_train.py                  # 4. 训练 BYOL + 建索引 → models/byol.pt / byol_X.npy
+copy config.example.py config.py      # 0. 先复制配置模板并填入 Tushare / LLM token
+```
+
+体积参考：`data/` 约 650MB、`models/` 约 1.4GB（含 120 万窗口嵌入索引）。
+
 ---
 
 ## 路线3 · BYOL（推荐 · 当前最优）
