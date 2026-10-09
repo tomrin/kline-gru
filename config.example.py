@@ -40,6 +40,22 @@ GRU_TRAIN_FRAC = 0.7     # 时间序列切分：训练集占比
 GRU_VAL_FRAC = 0.15      # 时间序列切分：验证集占比（余下为测试集）
 
 # ==========================================
+# BYOL 检索器参数（路线3：无负样本自监督嵌入）
+# 与 GRU 共用同一编码器，额外走 BYOL 自监督分支：online/target + stop-grad + EMA
+# 训练脚本 byol_train.py 保存 byol.pt / byol_X.npy / byol_meta.json
+# ==========================================
+BYOL_WEIGHT = 0.5         # 联合损失中 BYOL 权重（联合 = BYOL_MSE_WEIGHT*监督损失 + BYOL_WEIGHT*BYOL）
+BYOL_MSE_WEIGHT = 0.5     # 联合损失中监督损失权重（默认 1 - BYOL_WEIGHT）
+BYOL_SUP_LOSS = 'rank'    # 监督损失：'rank'=pairwise 排序损失（IC 基座）；'mse'=旧版点预测
+BYOL_EMA_TAU = 0.996      # target 网络 EMA 系数
+BYOL_PROJ_DIM = 32        # projector / predictor 维度
+BYOL_MASK_PROB = 0.2      # 时间 mask 比例（序列增强）
+BYOL_NOISE_STD = 0.1      # 高斯噪声标准差（序列增强）
+BYOL_SCALE_RANGE = 0.1    # 幅度缩放范围（序列增强）
+BYOL_BATCH_SIZE = 512     # BYOL 训练批大小（默认复用 GRU_BATCH_SIZE）
+BYOL_EPOCHS = 30          # BYOL 最大训练轮数（默认复用 GRU_EPOCHS）
+
+# ==========================================
 # K线训练营参数
 # ==========================================
 STOCK_SCOPE = 'hs300'  # 'hs300' = 沪深300成分股, 'all' = 全部A股
@@ -54,9 +70,11 @@ TRAIN_KLINE_COUNT = 30 # 训练使用的K线数量
 # ==========================================
 
 # 证据层：相似历史形态检索器（与 K-means「判类别」互补）
-#   'knn' = 欧氏距离 KNN（路线1，手工特征 + 固定度量）
-#   'gru' = GRU 学习嵌入 + 余弦相似度（路线2，学习度量）
-# 切换：改 RETRIEVER 即可，二者同层级、可互换；gru 需先运行 python gru_train.py
+#   'knn'  = 欧氏距离 KNN（路线1，手工特征 + 固定度量）
+#   'gru'  = GRU 学习嵌入 + 余弦相似度（路线2，纯 MSE 监督）
+#   'byol' = BYOL 自监督 GRU 嵌入 + 余弦相似度（路线3，排序损失 + 无负样本自监督）
+# 切换：改 RETRIEVER 即可，三者同层级、可互换；
+#        gru  需先 python gru_train.py；byol 需先 python byol_train.py
 RETRIEVER = 'knn'
 
 # 讲解层：当前使用的大模型（须在下方 LLM_PROVIDERS 中登记）

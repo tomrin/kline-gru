@@ -32,6 +32,10 @@ GRU_MODEL_PATH = os.path.join(_DIR, 'models', 'gru.pt')
 GRU_X_PATH = os.path.join(_DIR, 'models', 'gru_X.npy')
 GRU_META_PATH = os.path.join(_DIR, 'models', 'gru_meta.json')
 
+BYOL_MODEL_PATH = os.path.join(_DIR, 'models', 'byol.pt')
+BYOL_X_PATH = os.path.join(_DIR, 'models', 'byol_X.npy')
+BYOL_META_PATH = os.path.join(_DIR, 'models', 'byol_meta.json')
+
 
 def _load_gru_model(path):
     """惰性加载 GRU 模型（只在启用 GRU 检索器时引入 torch）。"""
@@ -233,6 +237,96 @@ class GruRetriever(BaseRetriever):
         return out
 
 
+class ByolRetriever(BaseRetriever):
+    """BYOL 检索器（路线3）：用 BYOL 自监督训练的 GRU 编码器嵌入做余弦相似检索。
+
+    与 GruRetriever 同层级，区别只在训练方式：
+    - GRU（路线2）：纯 MSE 监督
+    - BYOL（路线3）：MSE 监督 + BYOL 自监督（无负样本、stop-gradient + EMA），
+                  嵌入更稳健、防坍缩，跨股票检索把不同股票推得更正交
+
+    需先运行 `python byol_train.py` 产出模型与索引。
+    """
+    name = 'byol'
+    label = 'BYOL'
+    latency = '约1秒'
+
+    _index = None          # (X, metas)
+    _model = None
+    _lock = threading.Lock()
+
+    def _load_index(self):
+        if self._index is not None:
+            return self._index
+        with self._lock:
+            if self._index is not None:
+                return self._index
+            for path in (BYOL_MODEL_PATH, BYOL_X_PATH, BYOL_META_PATH):
+                if not os.path.exists(path):
+                    _log.warning('BYOL 检索库不完整（请先运行 python byol_train.py），讲评将不含相似形态')
+                    return None
+            t0 = time.time()
+            X = np.load(BYOL_X_PATH)
+            with open(BYOL_META_PATH, encoding='utf-8') as f:
+                metas = json.load(f)
+            model = _load_gru_model(BYOL_MODEL_PATH)
+            self._index = (X, metas)
+            self._model = model
+            _log.info('BYOL 检索库加载完成：%d 个历史窗口，用时 %.1fs', len(metas), time.time() - t0)
+            return self._index
+
+    def warmup(self):
+        try:
+            self._load_index()
+        except Exception as e:
+            _log.warning('BYOL 检索库预热失败: %s', e)
+
+    def retrieve(self, kline_data, code='', top=5):
+        window = getattr(config, 'WINDOW', 15)
+        if not kline_data or len(kline_data) < window:
+            return None
+
+        idx = self._load_index()
+        if idx is None:
+            return None
+        X, metas = idx
+        model = self._model
+
+        win_rows = kline_data[-window:]
+        try:
+            import torch
+            from gru_model import feature_matrix, cosine_similarity
+            mat = feature_matrix(win_rows)
+            with torch.no_grad():
+                x = torch.from_numpy(mat[None]).float()
+                _, emb = model(x)
+            emb = emb.detach().numpy().astype(np.float32)
+            emb = emb / (np.linalg.norm(emb) + 1e-9)
+        except Exception as e:
+            _log.warning('BYOL 特征计算失败: %s', e)
+            return None
+
+        start = str(win_rows[0].get('date', ''))
+        end = str(win_rows[-1].get('date', ''))
+
+        # 余弦相似度 + 过滤（排除自我匹配、只留目标窗口开始日之前的先例）
+        sims = cosine_similarity(emb, X)[0]
+        order = np.argsort(-sims)
+
+        exclude = (code, start, end) if code else None
+        out = []
+        for i in order:
+            m = metas[i]
+            if exclude and (m.get('code'), str(m.get('start')), str(m.get('end'))) == exclude:
+                continue
+            if start and str(m.get('end', '')) >= start:
+                continue
+            out.append((float(sims[i]), m))
+            if len(out) >= top:
+                break
+        return out
+
+
 # ==========================================
 # 讲解层：大模型讲评器
 # ==========================================
@@ -334,6 +428,7 @@ class OpenAICompatProvider(BaseLLMProvider):
 RETRIEVERS = {
     'knn': KnnRetriever,
     'gru': GruRetriever,
+    'byol': ByolRetriever,
     # 在此登记其他证据层实现，例如：
     # 'dtw': DtwRetriever,
     # 'embedding': EmbeddingRetriever,

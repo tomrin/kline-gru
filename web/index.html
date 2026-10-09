@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>K线训练营</title>
-    <link rel="stylesheet" href="css/style.css?v=250903b">
+    <link rel="stylesheet" href="css/style.css?v=250910f">
 </head>
 <body>
     <div id="app">
@@ -86,6 +86,7 @@
                                 <span class="retriever-switch" id="retrieverSwitch">
                                     <button type="button" class="retriever-btn active" data-retriever="knn">KNN</button>
                                     <button type="button" class="retriever-btn" data-retriever="gru">GRU</button>
+                                    <button type="button" class="retriever-btn" data-retriever="byol">BYOL</button>
                                 </span>
                                 <span class="layer-meta" id="layerRetrieverMeta">KNN · 约1秒</span>
                             </div>
@@ -112,6 +113,17 @@
                                         <div class="layer-placeholder">点上方「GRU」按钮检索</div>
                                     </div>
                                 </div>
+                                <!-- BYOL 结果区：点击上方 BYOL 按钮直接检索，结果保留 -->
+                                <div class="retriever-result" id="rrByol">
+                                    <div class="rr-head">
+                                        <span class="rr-tag tag-byol">BYOL</span>
+                                        <span class="rr-sub">无负样本对比学习嵌入 · 余弦相似度</span>
+                                        <span class="rr-status" id="byolStatus">未检索</span>
+                                    </div>
+                                    <div class="rr-body" id="byolResultBody">
+                                        <div class="layer-placeholder">点上方「BYOL」按钮检索</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="layer" id="layerLLM">
@@ -128,6 +140,8 @@
                     </div>
                 </div>
             </aside>
+            <!-- 左侧栏拖拽手柄（拖动调整栏宽 240~640px，宽度记忆） -->
+            <div class="sidebar-resizer" id="sidebarResizer" title="拖动调整左栏宽度"></div>
 
             <!-- 中间主区域 -->
             <main id="chartArea">
@@ -317,9 +331,9 @@
     <!-- 脚本 -->
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
     <script src="js/config.js"></script>
-    <script src="js/game-engine.js?v=250903b"></script>
-    <script src="js/kline-chart.js?v=250903b"></script>
-    <script src="js/kline-analysis.js?v=250903b"></script>
-    <script src="js/app.js?v=250903b"></script>
+    <script src="js/game-engine.js?v=250910f"></script>
+    <script src="js/kline-chart.js?v=250910f"></script>
+    <script src="js/kline-analysis.js?v=250910f"></script>
+    <script src="js/app.js?v=250910f"></script>
 </body>
 </html>

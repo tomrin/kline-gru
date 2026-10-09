@@ -48,11 +48,55 @@ async function init() {
         chart = new KlineChart();
         bindEvents();
         initUser();
+        initSidebarResizer();
         loadEngines();
         showMsg('准备就绪，点击"开始训练"！', 'success');
     } catch (e) {
         showMsg('初始化失败: ' + (e.message || '未知错误'), 'error');
     }
+}
+
+/** 初始化左侧栏宽度拖拽（240~640px，localStorage 记忆，拖动结束联动图表 resize） */
+function initSidebarResizer() {
+    var resizer = document.getElementById('sidebarResizer');
+    var sidebar = document.getElementById('leftSidebar');
+    if (!resizer || !sidebar) return;
+
+    var MIN_W = 240, MAX_W = 640, LS_KEY = 'kline_sidebar_w';
+
+    // 恢复上次宽度
+    var saved = parseInt(localStorage.getItem(LS_KEY), 10);
+    if (saved && saved >= MIN_W && saved <= MAX_W) {
+        document.documentElement.style.setProperty('--sidebar-w', saved + 'px');
+    }
+
+    var startX = 0, startW = 0, dragging = false;
+
+    resizer.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        dragging = true;
+        startX = e.clientX;
+        startW = sidebar.getBoundingClientRect().width;
+        resizer.classList.add('dragging');
+        document.body.classList.add('sidebar-resizing');
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!dragging) return;
+        var w = startW + (e.clientX - startX);
+        w = Math.max(MIN_W, Math.min(MAX_W, w));
+        document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (!dragging) return;
+        dragging = false;
+        resizer.classList.remove('dragging');
+        document.body.classList.remove('sidebar-resizing');
+        var w = Math.round(sidebar.getBoundingClientRect().width);
+        localStorage.setItem(LS_KEY, String(w));
+        if (chart && typeof chart.resize === 'function') chart.resize();
+    });
 }
 
 /** 加载三层讲评引擎信息，动态显示各层当前引擎名与耗时 */
@@ -64,7 +108,7 @@ function loadEngines() {
             var layers = d.layers;
             setLayerMeta('layerRetrieverMeta', layers.retriever);
             setLayerMeta('layerLLMMeta', layers.llm);
-            // 初始化检索器切换按钮（KNN / GRU），高亮后端默认项
+            // 初始化检索器切换按钮（KNN / GRU / BYOL），高亮后端默认项
             if (d.retrievers && d.retrievers.length) {
                 var def = null;
                 for (var i = 0; i < d.retrievers.length; i++) {
@@ -77,7 +121,7 @@ function loadEngines() {
         .catch(function(e) { console.warn('[engines] 加载引擎信息失败:', e); });
 }
 
-/** 高亮检索器切换按钮 + 记录当前选择（KNN / GRU） */
+/** 高亮检索器切换按钮 + 记录当前选择（KNN / GRU / BYOL） */
 function setRetrieverSwitch(name) {
     window._retriever = name;
     var btns = document.querySelectorAll('#retrieverSwitch .retriever-btn');
@@ -90,7 +134,7 @@ function setRetrieverSwitch(name) {
     }
 }
 
-/** 切换检索器并立即触发检索（KNN / GRU 结果各自独立保留，可同时对比） */
+/** 切换检索器并立即触发检索（KNN / GRU / BYOL 结果各自独立保留，可同时对比） */
 function switchRetriever(name) {
     setRetrieverSwitch(name);
     triggerRetrieval(name);
@@ -148,6 +192,10 @@ async function startGame() {
         showMsg('正在抽取股票...', 'info');
         gameView = await engine.startGame(stockList);
         applyView(gameView);
+        resetAnalysisLayers();
+        try { analyzeCurrentKline(); } catch(e) {
+            console.error('首根K线分析失败:', e);
+        }
         showMsg('游戏开始！', 'success');
         $('btnStart').disabled = true;
         $('welcomeOverlay').classList.add('hidden');
@@ -226,6 +274,7 @@ function doAutoNext() {
     }
     gameView = result;
     applyView(gameView);
+    resetAnalysisLayers();
     try { analyzeCurrentKline(); } catch(e) {
         console.error('K线分析失败:', e);
         showMsg('分析异常: ' + e.message, 'warn');
@@ -305,6 +354,9 @@ function callAIAnalysis(allKline, currentIndex, s) {
         '<div class="ai-loading">🤖 大模型深度讲评生成中，约需 30~40 秒…</div>';
     if (btn) { btn.disabled = true; btn.classList.add('loading'); btn.textContent = '⏳ 分析中...'; }
 
+    var aiEpoch = window._retrievalEpoch || 0;  // 记录发起时的K线纪元，响应到达时若已翻页则丢弃
+    var isStale = function() { return (window._retrievalEpoch || 0) !== aiEpoch; };
+
     var finish = function() {
         if (btn) { btn.disabled = false; btn.classList.remove('loading'); btn.textContent = '🤖 深度讲评'; }
     };
@@ -326,6 +378,10 @@ function callAIAnalysis(allKline, currentIndex, s) {
     xhr.onload = function() {
         console.log('[AI] onload status=', xhr.status);
         finish();
+        if (isStale()) {
+            console.log('[AI] 响应到达时已进入新K线，丢弃旧讲评');
+            return;
+        }
         if (xhr.status === 200) {
             try {
                 var resp = JSON.parse(xhr.responseText);
@@ -346,11 +402,13 @@ function callAIAnalysis(allKline, currentIndex, s) {
 
     xhr.onerror = function(e) {
         console.error('[AI] onerror', e);
+        if (isStale()) { finish(); return; }
         fallbackToRule('网络错误');
     };
 
     xhr.ontimeout = function() {
         console.error('[AI] ontimeout');
+        if (isStale()) { finish(); return; }
         fallbackToRule('请求超时');
     };
 
@@ -359,16 +417,39 @@ function callAIAnalysis(allKline, currentIndex, s) {
     console.log('[AI] xhr.send 已调用');
 }
 
-/** 指定检索器（knn/gru）检索相似历史形态，结果渲染到该检索器专属区域并保留 */
+/** 清空讲评面板：① 规则引擎 + ② 三路检索器（KNN/GRU/BYOL）结果区 + ③ 深度讲评区，全部恢复占位；
+ *  进入新K线/新回合时调用（① 随后会被 analyzeCurrentKline 立即重填）。同时递增检索纪元号，
+ *  使在途的旧检索/旧讲评响应被丢弃，避免旧结果回填 */
+function resetAnalysisLayers() {
+    window._cards = {};
+    window._retrievalEpoch = (window._retrievalEpoch || 0) + 1;
+    var names = ['knn', 'gru', 'byol'];
+    for (var i = 0; i < names.length; i++) {
+        var nm = names[i];
+        var bodyEl = document.getElementById(nm + 'ResultBody');
+        var statusEl = document.getElementById(nm + 'Status');
+        if (bodyEl) bodyEl.innerHTML = '<div class="layer-placeholder">点上方「' + nm.toUpperCase() + '」按钮检索</div>';
+        if (statusEl) { statusEl.textContent = '未检索'; statusEl.className = 'rr-status'; }
+    }
+    var ruleEl = document.getElementById('layerRuleBody');
+    if (ruleEl) ruleEl.innerHTML = '<div class="layer-placeholder">每步K线自动分析</div>';
+    var llmEl = document.getElementById('layerLLMBody');
+    if (llmEl) llmEl.innerHTML = '<div class="layer-placeholder">大模型深度分析（点「深度讲评」生成）</div>';
+    var aiBtn = document.getElementById('btnAIAnalysis');
+    if (aiBtn) { aiBtn.disabled = false; aiBtn.classList.remove('loading'); aiBtn.textContent = '🤖 深度讲评'; }
+}
+
+/** 指定检索器（knn/gru/byol）检索相似历史形态，结果渲染到该检索器专属区域并保留 */
 function requestRetriever(name, allKline, s) {
     name = name || 'knn';
-    var isGru = (name === 'gru');
-    var bodyEl = document.getElementById(isGru ? 'gruResultBody' : 'knnResultBody');
-    var statusEl = document.getElementById(isGru ? 'gruStatus' : 'knnStatus');
+    var bodyEl = document.getElementById(name + 'ResultBody');
+    var statusEl = document.getElementById(name + 'Status');
 
     console.log('[Retriever] 开始检索, 检索器=', name);
     if (statusEl) { statusEl.textContent = '检索中...'; statusEl.className = 'rr-status running'; }
     if (bodyEl) bodyEl.innerHTML = '<div class="layer-placeholder">检索中…</div>';
+
+    var epoch = window._retrievalEpoch || 0;  // 记录发起时的K线纪元，响应到达时若已翻页则丢弃
 
     var payload = {
         klineData: allKline,
@@ -379,6 +460,10 @@ function requestRetriever(name, allKline, s) {
     xhr.open('POST', '/api/knn', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.onload = function() {
+        if ((window._retrievalEpoch || 0) !== epoch) {
+            console.log('[Retriever] ' + name + ' 响应到达时已进入新K线，丢弃旧结果');
+            return;
+        }
         if (xhr.status === 200) {
             try {
                 var resp = JSON.parse(xhr.responseText);
@@ -441,9 +526,14 @@ function buildKNNCard(cases, name) {
     html += ' · 正收益占比 <b>' + posCnt + '/' + cases.length + '</b>';
     html += '</div>';
     html += html2;
-    var note = (name === 'gru')
-        ? '相似度按 GRU 学习嵌入的余弦相似度计算（越接近 1 越相似）；收益为历史复盘参考，不代表未来。'
-        : '相似度按最近15根K线的形态特征（60维）计算（距离越小越相似）；收益为历史复盘参考，不代表未来。';
+    var note;
+    if (name === 'gru') {
+        note = '相似度按 GRU 学习嵌入的余弦相似度计算（越接近 1 越相似）；收益为历史复盘参考，不代表未来。';
+    } else if (name === 'byol') {
+        note = '相似度按 BYOL 无负样本对比学习嵌入的余弦相似度计算（越接近 1 越相似）；收益为历史复盘参考，不代表未来。';
+    } else {
+        note = '相似度按最近15根K线的形态特征（60维）计算（距离越小越相似）；收益为历史复盘参考，不代表未来。';
+    }
     html += '<div class="knn-note">' + note + '</div>';
     html += '</div>';
     return html;

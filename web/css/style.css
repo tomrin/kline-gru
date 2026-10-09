@@ -75,18 +75,42 @@ body {
 }
 
 /* ============================================
-   左侧栏 180px
+   左侧栏（默认 360px，可拖拽调整 240~640px）
    ============================================ */
+:root { --sidebar-w: 360px; }
 #leftSidebar {
-    width: 280px;
-    min-width: 280px;
+    width: var(--sidebar-w);
+    min-width: 240px;
+    max-width: 640px;
     background: #222;
     border-right: 1px solid #333;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
+    overflow-x: hidden;
     flex-shrink: 0;
 }
+
+/* 左侧栏拖拽手柄 */
+.sidebar-resizer {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: transparent;
+    border-right: 1px solid transparent;
+    transition: background 0.15s;
+}
+.sidebar-resizer:hover,
+.sidebar-resizer.dragging {
+    background: rgba(26, 188, 156, 0.35);
+}
+body.sidebar-resizing {
+    cursor: col-resize;
+    user-select: none;
+    -webkit-user-select: none;
+}
+body.sidebar-resizing iframe,
+body.sidebar-resizing canvas { pointer-events: none; }
 
 .user-card {
     padding: 16px 12px;
@@ -451,6 +475,7 @@ body {
 }
 .tag-knn { background: #1abc9c; color: #0f1a18; }
 .tag-gru { background: #9b59b6; color: #f3e8ff; }
+.tag-byol { background: #f39c12; color: #1a1206; }
 .rr-sub {
     font-size: 10px;
     color: #666;
@@ -996,6 +1021,7 @@ body {
     #leftSidebar {
         width: 100%;
         min-width: 100%;
+        max-width: none;
         flex-direction: row;
         flex-wrap: wrap;
         max-height: 140px;
@@ -1003,6 +1029,7 @@ body {
         border-right: none;
         border-bottom: 1px solid #333;
     }
+    .sidebar-resizer { display: none; }
     .user-card, .commentary-section { display: none; }
     .stats-card { display: flex; gap: 12px; padding: 8px; }
     .round-info { padding: 6px 12px; }
